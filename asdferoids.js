@@ -64,60 +64,73 @@ function addResizeListener() {
 
 //---- Linear stroke renderer -------------------------------------------------
 
+const LOC_TILE_VERT           = 0;
+const LOC_TILE_INSTANCE_COORD = 1;
+
 
 const VERTEX_SHADER_GLSL =
 `#version 300 es
 
-// Input attributes
-layout(location = 0) in vec2 coord;
-layout(location = 1) in ivec2 tile_coord_vertex;
+// tile_vert is the location of the vertex in the tile geometry. Each tile
+// has four vertices in a TRIANGLE_STRIP.
+layout(location = ${LOC_TILE_VERT}) in vec2 tile_vert;
+
+// tile_instance_coord is the coordinate of the tile instance within the grid,
+// used to move the tile geometry to its desired location.
+layout(location = ${LOC_TILE_INSTANCE_COORD}) in ivec2 tile_instance_coord;
 
 // Uniforms
+uniform ivec2 tile_size;
 uniform ivec2 canvas_size;
 
-// Output variable
-flat out ivec2 tile_coord_frag;
-
 void main() {
-  vec2 p = 2.0 * coord / vec2(canvas_size) - 1.0;
+  vec2 pv = tile_vert + vec2(tile_instance_coord * tile_size);
+  vec2 p  = 2.0 * pv / vec2(canvas_size) - 1.0;
 
   gl_Position = vec4(p.x, p.y, 0.0, 1.0);
 }
 `
 
-const FRAG_GLSL =
+const FRAGMENT_SHADER_GLSL =
 `#version 300 es
-precision mediump float;
+precision highp float;
 
-// Input variables
-flat in ivec2 tile_coord_frag;
-
-// Output variables
-out vec4 outColor;
-
+out vec4 out_color;
 void main() {
-  outColor = vec4(0.1, 0.4, 0.1, 0.1);
+  out_color = vec4(0.1, 0.4, 0.1, 1.0);
 }
 `
 
+function createShader(gl, type, source) {
+    const shader = gl.createShader(type);
+    gl.shaderSource(shader, source);
+    gl.compileShader(shader);
+
+    if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+        const err = gl.getShaderInfoLog(shader);
+        const msg =
+              'Error compiling shader.\n' +
+              'Source:\n' +
+              source +
+              'Error message:\n' +
+              err +
+              '\n';
+        console.error(msg);
+        gl.deleteShader(shader);
+    }
+
+    return shader;
+}
+
+
 function testQuad() {
     const canvas = document.getElementById(CANVAS_ID);
-    const gl = canvas.getContext("webgl2");
+    const gl = canvas.getContext('webgl2');
 
-    const vertShader = gl.createShader(gl.VERTEX_SHADER);
-    gl.shaderSource(vertShader, VERTEX_SHADER_GLSL);
-    gl.compileShader(vertShader);
-    if (!gl.getShaderParameter(vertShader, gl.COMPILE_STATUS)) {
-        console.error(`Error compiling vert shader: ${gl.getShaderInfoLog(vertShader)}`);
-    }
-
-    const fragShader = gl.createShader(gl.FRAGMENT_SHADER);
-    gl.shaderSource(fragShader, FRAG_GLSL);
-    gl.compileShader(fragShader);
-    if (!gl.getShaderParameter(fragShader, gl.COMPILE_STATUS)) {
-        console.error(`Error compiling vert shader: ${gl.getShaderInfoLog(fragShader)}`);
-    }
-
+    const vertShader =
+          createShader(gl, gl.VERTEX_SHADER, VERTEX_SHADER_GLSL);
+    const fragShader =
+          createShader(gl, gl.FRAGMENT_SHADER, FRAGMENT_SHADER_GLSL);
     const shaderProgram = gl.createProgram();
     gl.attachShader(shaderProgram, vertShader);
     gl.attachShader(shaderProgram, fragShader);
@@ -125,101 +138,68 @@ function testQuad() {
     if (!gl.getProgramParameter(shaderProgram, gl.LINK_STATUS)) {
         console.error(`Error linking shader program: ${gl.getProgramInfoLog(shaderProgram)}`);
     }
-
     gl.useProgram(shaderProgram);
 
-    /*
-    const vertices = [
-        0.2, 0.2,
-        0.5, 0.2,
-        0.5, 0.5,
-        0.2, 0.5,
-    ]
-    */
-    const vertices = [
-         0.0,  0.0,
-        32.0,  0.0,
-        32.0, 32.0,
-         0.0, 32.0
-    ];
-    const tile_coords = [
-        // duplicate for all vertices in each tile
-        0, 0,
-        0, 0,
-        0, 0,
-        0, 0
-    ];
-    const indices = [0, 1, 2, 0, 2, 3];
+    const tileSize = 32;
 
-    // Create buffers
+    const vertexData =
+          new Float32Array(
+              [
+                         0,        0,
+                         0, tileSize,
+                  tileSize,        0,
+                  tileSize, tileSize
+              ]
+          );
+    const vertexBuffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, vertexBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, vertexData, gl.STATIC_DRAW);
 
-    const vertex_buffer = gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER, vertex_buffer);
-    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vertices), gl.STATIC_DRAW);
-    gl.bindBuffer(gl.ARRAY_BUFFER, null);
+    const tileInstanceCoords =
+          new Int32Array(
+              [
+                  0, 0,
+                  1, 1,
+                  2, 1,
+                  10, 10
+              ]
+          );
+    const tileInstanceBuffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, tileInstanceBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, tileInstanceCoords, gl.STATIC_DRAW);
 
-    const index_buffer = gl.createBuffer();
-    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, index_buffer);
-    gl.bufferData(
-        gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(indices), gl.STATIC_DRAW);
-    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, null);
+    gl.enableVertexAttribArray(LOC_TILE_VERT);
+    gl.bindBuffer(gl.ARRAY_BUFFER, vertexBuffer);
+    gl.vertexAttribPointer(LOC_TILE_VERT, 2, gl.FLOAT, false, 0, 0);
 
-    const tile_coords_buffer = gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER, tile_coords_buffer);
-    gl.bufferData(gl.ARRAY_BUFFER, new Uint16Array(tile_coords), gl.STATIC_DRAW);
-    gl.bindBuffer(gl.ARRAY_BUFFER, null);
+    gl.enableVertexAttribArray(LOC_TILE_INSTANCE_COORD);
+    gl.bindBuffer(gl.ARRAY_BUFFER, tileInstanceBuffer);
+    gl.vertexAttribIPointer(LOC_TILE_INSTANCE_COORD, 2, gl.INT, 0, 0);
+    gl.vertexAttribDivisor(LOC_TILE_INSTANCE_COORD, 1);
 
-    // Bind buffers
-
-    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, index_buffer);
-
-    gl.enableVertexAttribArray(0);
-    gl.bindBuffer(gl.ARRAY_BUFFER, vertex_buffer);
-    gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
-
-    gl.enableVertexAttribArray(1);
-    gl.bindBuffer(gl.ARRAY_BUFFER, tile_coords_buffer);
-    gl.vertexAttribPointer(1, 2, gl.UNSIGNED_SHORT, false, 0, 0);
-
-    const locSzCanvas = gl.getUniformLocation(shaderProgram, 'canvas_size');
-    gl.uniform2i(locSzCanvas, canvas.width, canvas.height);
+    const uloc_tile_size = gl.getUniformLocation(shaderProgram, 'tile_size');
+    const uloc_canvas_size = gl.getUniformLocation(shaderProgram, 'canvas_size');
+    gl.uniform2i(uloc_canvas_size, canvas.width, canvas.height);
+    gl.uniform2i(uloc_tile_size,   tileSize, tileSize);
 
     gl.viewport(0, 0, canvas.width, canvas.height);
     gl.clearColor(0.30, 0.05, 0.05, 1.0);
     gl.clear(gl.COLOR_BUFFER_BIT);
-    gl.drawElements(gl.TRIANGLES, indices.length, gl.UNSIGNED_SHORT, 0);
-}
 
+    console.log(`nVerts        = ${vertexData.length / 2}`);
+    console.log(`instanceCount = ${tileInstanceCoords.length / 2}`);
+
+    const nVerts        = vertexData.length / 2;
+    const instanceCount = tileInstanceCoords.length / 2;
+    gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, nVerts, instanceCount);
+}
 
 
 //-----------------------------------------------------------------------------
-
-
-
-function main() {
-  const canvas = document.getElementById(CANVAS_ID);
-  // Initialize the GL context
-  const gl = canvas.getContext("webgl2");
-
-  // Only continue if WebGL is available and working
-  if (gl === null) {
-    alert(
-      "Unable to initialize WebGL. Your browser or machine may not support it."
-    );
-    return;
-  }
-
-  gl.clearColor(0.30, 0.05, 0.05, 1.0);
-  // Clear the color buffer with specified clear color
-  gl.clear(gl.COLOR_BUFFER_BIT);
-
-    testQuad(gl);
-}
 
 
 addCanvas()
 resizeCanvas()
 addResizeListener()
 
-// main()
 testQuad()
