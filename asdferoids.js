@@ -62,6 +62,11 @@ function addResizeListener() {
 }
 
 
+function addOrientationChangeListener() {
+    window.addEventListener('orientationchange', () => { resizeCanvas(); testQuad; })
+}
+
+
 //---- Linear stroke renderer -------------------------------------------------
 
 const LOC_TILE_VERT           = 0;
@@ -201,5 +206,6 @@ function testQuad() {
 addCanvas()
 resizeCanvas()
 addResizeListener()
+addOrientationChangeListener()
 
 testQuad()
