@@ -192,6 +192,7 @@ function testQuad() {
 
 //---- Renderable object encoding ---------------------------------------------
 
+/** Bounding box for geometry. */
 class BBox {
     constructor(xmin, ymin, xmax, ymax) {
         this.xmin = xmin <= xmax ? xmin : xmax;
@@ -224,7 +225,12 @@ class BBox {
     }
 
     intersects(other) {
-        return true;
+        const noIntersect =
+              this.xmin > other.xmax ||
+              this.xmax < other.xmin ||
+              this.ymin > other.ymin ||
+              this.ymax < other.ymin;
+        return !noIntersect;
     }
 }
 
@@ -344,7 +350,7 @@ class Geoms {
 
                     let tile_arr = this.tilePrims[tile_idx];
                     if (this.tilePrims[tile_idx] == null) {
-                        tile_arr = []
+                        tile_arr = [];
                         this.tilePrims[tile_idx] = tile_arr;
                     }
 
