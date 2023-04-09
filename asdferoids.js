@@ -190,11 +190,205 @@ function testQuad() {
 }
 
 
+//---- Renderable object encoding ---------------------------------------------
+
+class BBox {
+    constructor(xmin, ymin, xmax, ymax) {
+        this.xmin = xmin <= xmax ? xmin : xmax;
+        this.xmax = xmax >= xmin ? xmax : xmin;
+        this.ymin = ymin <= ymax ? ymin : ymax;
+        this.ymax = ymax >= ymin ? ymax : ymin;
+    }
+
+    addBorder(width) {
+        return new BBox(
+            this.xmin - width,
+            this.ymin - width,
+            this.xmax + width,
+            this.ymax + width
+        );
+    }
+
+    tileHits(tileSize) {
+        const minTileX = Math.floor(this.xmin / tileSize);
+        const maxTileX = Math.ceil (this.xmax / tileSize);
+        const minTileY = Math.floor(this.ymin / tileSize);
+        const maxTileY = Math.ceil (this.ymax / tileSize);
+
+        return {
+            minTileX: minTileX,
+            maxTileX: maxTileX,
+            minTileY: minTileY,
+            maxTileY: maxTileY
+        }
+    }
+
+    intersects(other) {
+        return true;
+    }
+}
+
+class Circle {
+    constructor(x, y, r) {
+        this.x = x;
+        this.y = y;
+        this.r = r;
+    }
+
+    bbox() {
+        return new BBox(
+            this.x - this.r,
+            this.y - this.r,
+            this.x + this.r,
+            this.y + this.r
+        );
+    }
+
+    encode(epb) {
+        epb.push(0);       // type marker for a circle
+        epb.push(this.x);
+        epb.push(this.y);
+        epb.push(this.r);
+    }
+}
+
+class Line {
+    constructor(x0, y0, x1, y1, width) {
+        this.x0    = x0;
+        this.y0    = y0;
+        this.x1    = x1;
+        this.y1    = y1;
+        this.width = width;
+    }
+
+    bbox() {
+        const hw = this.width / 2.0;
+        let xmin, ymin, xmax, ymax;
+        if (this.x0 <= this.x1) {
+            xmin = this.x0;
+            xmax = this.x1;
+        } else {
+            xmin = this.x1;
+            xmax = this.x0;
+        }
+        if (this.y0 <= this.y1) {
+            ymin = this.y0;
+            ymax = this.y1;
+        } else {
+            ymin = this.y1;
+            ymax = this.y0;
+        }
+        return new BBox(xmin - hw, ymin - hw, xmax + hw, ymax + hw);
+    }
+
+    encode(epb) {
+        epb.push(1);       // type marker for a line
+        epb.push(this.x0);
+        epb.push(this.y0);
+        epb.push(this.x1);
+        epb.push(this.y1);
+        epb.push(this.width);
+    }
+}
+
+
+class EncodedPrimBuf {
+    constructor(size) {
+        this.encoded = new Float32Array(size)
+        this.ofs     = 0
+    }
+
+    push(value) {
+        this.encoded[this.ofs++] = value;
+    }
+
+    buffer() {
+        return this.encoded;
+    }
+
+    length() {
+        return this.ofs;
+    }
+}
+
+
+class Geoms {
+    constructor(primBuf, canvasWidth, canvasHeight, tileSize, addedBorder) {
+        this.canvasWidth  = canvasWidth;
+        this.canvasHeight = canvasHeight;
+        this.tileSize     = tileSize;
+        this.addedBorder  = addedBorder;
+        this.canvasBBox   = new BBox(0, 0, canvasWidth, canvasHeight);
+
+        this.primBuf = primBuf;
+
+        this.nTilesX = Math.ceil(canvasWidth  / tileSize);
+        this.nTilesY = Math.ceil(canvasHeight / tileSize);
+        this.nTiles = this.nTilesX * this.nTilesY;
+        this.tilePrims = new Array(this.nTiles).fill(null);
+    }
+
+    pushPrim(prim) {
+        const bbox = prim.bbox().addBorder(this.addedBorder);
+        if (bbox.intersects(this.canvasBBox)) {
+            const ofs = this.primBuf.length();
+            prim.encode(this.primBuf);
+
+            const hits = bbox.tileHits(this.tileSize);
+            let tile_y = hits.minTileY;
+            while (tile_y <= hits.maxTileY) {
+                let tile_x = hits.minTileX;
+                while (tile_x <= hits.maxTileX) {
+
+                    const tile_idx = tile_y * this.nTilesX + tile_x;
+
+                    let tile_arr = this.tilePrims[tile_idx];
+                    if (this.tilePrims[tile_idx] == null) {
+                        tile_arr = []
+                        this.tilePrims[tile_idx] = tile_arr;
+                    }
+
+                    tile_arr.push(ofs);
+
+                    tile_x += 1;
+                }
+                tile_y += 1;
+            }
+        }
+    }
+
+    drawCircle(x, y, r) {
+        this.pushPrim(new Circle(x, y, r));
+    }
+
+    drawLine(x0, y0, x1, y1, width) {
+        this.pushPrim(new Line(x0, y0, x1, y1, width));
+    }
+}
+
+
 //-----------------------------------------------------------------------------
 
+
+function testRender() {
+
+    const canvas = document.getElementById(CANVAS_ID);
+
+    const primBuf = new EncodedPrimBuf(512);
+    const geoms = new Geoms(primBuf, canvas.width, canvas.height, 32, 0);
+
+    geoms.drawCircle(10, 10, 5);
+    geoms.drawLine(0, 0, 100, 200, 2);
+
+    console.log(primBuf);
+    console.log(geoms.tilePrims);
+
+}
 
 addCanvas()
 resizeCanvas()
 addResizeListener()
+
+testRender()
 
 testQuad()
