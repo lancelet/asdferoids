@@ -217,10 +217,10 @@ class BBox {
         const maxTileY = Math.ceil (this.ymax / tileSize);
 
         return {
-            minTileX: minTileX,
-            maxTileX: maxTileX,
-            minTileY: minTileY,
-            maxTileY: maxTileY
+            minTileX: minTileX >= 0 ? minTileX : 0,
+            maxTileX: maxTileX >= 0 ? maxTileX : 0,
+            minTileY: minTileY >= 0 ? minTileY : 0,
+            maxTileY: maxTileY >= 0 ? maxTileY : 0
         }
     }
 
@@ -228,7 +228,7 @@ class BBox {
         const noIntersect =
               this.xmin > other.xmax ||
               this.xmax < other.xmin ||
-              this.ymin > other.ymin ||
+              this.ymin > other.ymax ||
               this.ymax < other.ymin;
         return !noIntersect;
     }
@@ -298,6 +298,7 @@ class Line {
 }
 
 
+/** A Float32Array wrapped so it's easier to push items onto the end. */
 class EncodedPrimBuf {
     constructor(size) {
         this.encoded = new Float32Array(size)
@@ -315,6 +316,10 @@ class EncodedPrimBuf {
     length() {
         return this.ofs;
     }
+
+    reset() {
+        this.ofs = 0;
+    }
 }
 
 
@@ -326,12 +331,26 @@ class Geoms {
         this.addedBorder  = addedBorder;
         this.canvasBBox   = new BBox(0, 0, canvasWidth, canvasHeight);
 
+        // this.primBuf contains flattened encodings of all the primitives
+        // in sequence.
         this.primBuf = primBuf;
+        this.primBuf.reset();
 
+        // this.tilePrims in an array. It contains one element per tile. The
+        // elements are either null, or they are another array containing the
+        // offsets of each primitive (in the this.primBuf array) that intersect
+        // the tile.
         this.nTilesX = Math.ceil(canvasWidth  / tileSize);
         this.nTilesY = Math.ceil(canvasHeight / tileSize);
         this.nTiles = this.nTilesX * this.nTilesY;
         this.tilePrims = new Array(this.nTiles).fill(null);
+
+
+        // TODO: consider having a fixed number of primitives per tile.
+        //   eg. 3840 x 2160 res; with 64x64 tiles:
+        //      60 x 34 = 2040 tiles.
+        // If each tile has 16 primitives: 2040 x 16 = 32,640 cells
+        // Each cell is 4 bytes => 130k memory.
     }
 
     pushPrim(prim) {
@@ -341,24 +360,20 @@ class Geoms {
             prim.encode(this.primBuf);
 
             const hits = bbox.tileHits(this.tileSize);
-            let tile_y = hits.minTileY;
-            while (tile_y <= hits.maxTileY) {
-                let tile_x = hits.minTileX;
-                while (tile_x <= hits.maxTileX) {
 
-                    const tile_idx = tile_y * this.nTilesX + tile_x;
+            for (let y = hits.minTileY; y <= hits.maxTileY; y++) {
+                const y_ofs = y * this.nTilesX;
+                for (let x = hits.minTileX; x <= hits.maxTileX; x++) {
+                    const i = y_ofs + x;
 
-                    let tile_arr = this.tilePrims[tile_idx];
-                    if (this.tilePrims[tile_idx] == null) {
+                    let tile_arr = this.tilePrims[i];
+                    if (tile_arr == null) {
                         tile_arr = [];
-                        this.tilePrims[tile_idx] = tile_arr;
+                        this.tilePrims[i] = tile_arr;
                     }
 
                     tile_arr.push(ofs);
-
-                    tile_x += 1;
                 }
-                tile_y += 1;
             }
         }
     }
@@ -369,6 +384,35 @@ class Geoms {
 
     drawLine(x0, y0, x1, y1, width) {
         this.pushPrim(new Line(x0, y0, x1, y1, width));
+    }
+
+    flattenRenderTiles() {
+        const prim_ofs = [];
+        const tiles    = [];
+
+        for (let y = 0; y < this.nTilesY; y++) {
+            const y_ofs = y * this.nTilesX;
+            for (let x = 0; x < this.nTilesX; x++) {
+                const i = y_ofs + x;
+                const tile_ofs_arr = this.tilePrims[i];
+                if (tile_ofs_arr != null) {
+                    const tile = {
+                        tileX:     x,
+                        tileY:     y,
+                        primOfs:   prim_ofs.length,
+                        primCount: tile_ofs_arr.length
+                    };
+                    tiles.push(tile);
+                    prim_ofs.push(...tile_ofs_arr);
+                }
+            }
+        }
+
+        return {
+            primBuf:     this.primBuf,
+            primOffsets: prim_ofs,
+            tiles:       tiles
+        }
     }
 }
 
@@ -381,14 +425,15 @@ function testRender() {
     const canvas = document.getElementById(CANVAS_ID);
 
     const primBuf = new EncodedPrimBuf(512);
+    //const geoms = new Geoms(primBuf, canvas.width, canvas.height, 32, 0);
     const geoms = new Geoms(primBuf, canvas.width, canvas.height, 32, 0);
 
     geoms.drawCircle(10, 10, 5);
     geoms.drawLine(0, 0, 100, 200, 2);
+    geoms.drawCircle(50, 50, 10);
+    geoms.drawLine(10, 10, 100, 10, 5);
 
-    console.log(primBuf);
-    console.log(geoms.tilePrims);
-
+    console.log(geoms.flattenRenderTiles())
 }
 
 addCanvas()
