@@ -62,41 +62,36 @@ function addResizeListener() {
 }
 
 
-function addOrientationChangeListener() {
-    window.addEventListener('orientationchange', () => { resizeCanvas(); testQuad; })
-}
-
-
 //---- Linear stroke renderer -------------------------------------------------
 
 const LOC_TILE_VERT           = 0;
 const LOC_TILE_INSTANCE_COORD = 1;
 
 
-const VERTEX_SHADER_GLSL =
+const VERT_GLSL =
 `#version 300 es
 
 // tile_vert is the location of the vertex in the tile geometry. Each tile
 // has four vertices in a TRIANGLE_STRIP.
-layout(location = ${LOC_TILE_VERT}) in vec2 tile_vert;
+layout(location = ${LOC_TILE_VERT}) in uvec2 tile_vert;
 
 // tile_instance_coord is the coordinate of the tile instance within the grid,
 // used to move the tile geometry to its desired location.
-layout(location = ${LOC_TILE_INSTANCE_COORD}) in ivec2 tile_instance_coord;
+layout(location = ${LOC_TILE_INSTANCE_COORD}) in uvec2 tile_instance_coord;
 
 // Uniforms
-uniform ivec2 tile_size;
-uniform ivec2 canvas_size;
+uniform uvec2 tile_size;
+uniform uvec2 canvas_size;
 
 void main() {
-  vec2 pv = tile_vert + vec2(tile_instance_coord * tile_size);
+  vec2 pv = vec2(tile_vert + tile_instance_coord * tile_size);
   vec2 p  = 2.0 * pv / vec2(canvas_size) - 1.0;
 
   gl_Position = vec4(p.x, p.y, 0.0, 1.0);
 }
 `
 
-const FRAGMENT_SHADER_GLSL =
+const FRAG_GLSL =
 `#version 300 es
 precision highp float;
 
@@ -132,10 +127,8 @@ function testQuad() {
     const canvas = document.getElementById(CANVAS_ID);
     const gl = canvas.getContext('webgl2');
 
-    const vertShader =
-          createShader(gl, gl.VERTEX_SHADER, VERTEX_SHADER_GLSL);
-    const fragShader =
-          createShader(gl, gl.FRAGMENT_SHADER, FRAGMENT_SHADER_GLSL);
+    const vertShader = createShader(gl, gl.VERTEX_SHADER, VERT_GLSL);
+    const fragShader = createShader(gl, gl.FRAGMENT_SHADER, FRAG_GLSL);
     const shaderProgram = gl.createProgram();
     gl.attachShader(shaderProgram, vertShader);
     gl.attachShader(shaderProgram, fragShader);
@@ -148,7 +141,7 @@ function testQuad() {
     const tileSize = 32;
 
     const vertexData =
-          new Float32Array(
+          new Uint8Array(
               [
                          0,        0,
                          0, tileSize,
@@ -161,7 +154,7 @@ function testQuad() {
     gl.bufferData(gl.ARRAY_BUFFER, vertexData, gl.STATIC_DRAW);
 
     const tileInstanceCoords =
-          new Int32Array(
+          new Uint16Array(
               [
                   0, 0,
                   1, 1,
@@ -175,24 +168,21 @@ function testQuad() {
 
     gl.enableVertexAttribArray(LOC_TILE_VERT);
     gl.bindBuffer(gl.ARRAY_BUFFER, vertexBuffer);
-    gl.vertexAttribPointer(LOC_TILE_VERT, 2, gl.FLOAT, false, 0, 0);
+    gl.vertexAttribIPointer(LOC_TILE_VERT, 2, gl.UNSIGNED_BYTE, 0, 0);
 
     gl.enableVertexAttribArray(LOC_TILE_INSTANCE_COORD);
     gl.bindBuffer(gl.ARRAY_BUFFER, tileInstanceBuffer);
-    gl.vertexAttribIPointer(LOC_TILE_INSTANCE_COORD, 2, gl.INT, 0, 0);
+    gl.vertexAttribIPointer(LOC_TILE_INSTANCE_COORD, 2, gl.UNSIGNED_SHORT, 0, 0);
     gl.vertexAttribDivisor(LOC_TILE_INSTANCE_COORD, 1);
 
     const uloc_tile_size = gl.getUniformLocation(shaderProgram, 'tile_size');
     const uloc_canvas_size = gl.getUniformLocation(shaderProgram, 'canvas_size');
-    gl.uniform2i(uloc_canvas_size, canvas.width, canvas.height);
-    gl.uniform2i(uloc_tile_size,   tileSize, tileSize);
+    gl.uniform2ui(uloc_canvas_size, canvas.width, canvas.height);
+    gl.uniform2ui(uloc_tile_size,   tileSize, tileSize);
 
     gl.viewport(0, 0, canvas.width, canvas.height);
     gl.clearColor(0.30, 0.05, 0.05, 1.0);
     gl.clear(gl.COLOR_BUFFER_BIT);
-
-    console.log(`nVerts        = ${vertexData.length / 2}`);
-    console.log(`instanceCount = ${tileInstanceCoords.length / 2}`);
 
     const nVerts        = vertexData.length / 2;
     const instanceCount = tileInstanceCoords.length / 2;
@@ -206,6 +196,5 @@ function testQuad() {
 addCanvas()
 resizeCanvas()
 addResizeListener()
-addOrientationChangeListener()
 
 testQuad()
